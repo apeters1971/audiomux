@@ -37,25 +37,35 @@ audiocodec::configure(int samplingrate, int channels, int bitrate)
 
 
 int
-audiobuffer::wav2mpg(){
+audiobuffer::wav2mpeg(audiocodec& codec){
+    fprintf(stdout,"info: capacity=%lu framesize=%lu\n", mpegbuffer.capacity(), framesize);
     
-    return 0;
+    int len = opus_encode(codec.getEncoder(),
+        (const opus_int16 *) ptr(), framesize, (unsigned char*) mpegptr(),
+                      mpegbuffer.capacity());
+    if (len < 0) {
+        fprintf(stderr,"error: encoder returned %d as len\n", len);
+    } else {
+        fprintf(stdout,"info: encoder returned %d as len\n", len);
+    }
+    mpegbuffer.resize(len);
+    return len;
 }
 
 int
-audiobuffer::mpg2wav()
+audiobuffer::mpeg2wav(audiocodec& codec)
 {
     return 0;
 }
 
 int
-audiobuffer::wav2udp()
+audiobuffer::mpeg2udp()
 {
     return 0;
 }
 
 int
-audiobuffer::upd2wav()
+audiobuffer::udp2mpeg()
 {
     return 0;
 }

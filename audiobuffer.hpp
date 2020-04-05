@@ -31,13 +31,15 @@ public:
         }
     }
     
+    OpusEncoder* getEncoder() {return encoder;}
+    OpusDecoder* getDecoder() {return decoder;}
 private:
     
     OpusEncoder* encoder;
     OpusDecoder* decoder;
 };
 
-class audiobuffer : public std::vector<char> {
+class audiobuffer : public std::vector<unsigned char> {
 public:
     audiobuffer(size_t _samplingrate,
                 int _channels,
@@ -60,6 +62,9 @@ public:
         resize(framesize*channels*samplesize);
         silence();
         samplesize=2;
+        mpegbuffer.reserve(1500);
+        mpegbuffer.resize(1500);
+  
     }
     
     virtual ~audiobuffer() {}
@@ -82,35 +87,42 @@ public:
         memset(ptr(), 0, size());
     }
     
-    char* ptr() {
+    unsigned char* ptr() {
       return &(operator[](0));
     }
     
-    char* ngebptr() {
+    unsigned char* mpegptr() {
       return &(mpegbuffer[0]);
+    }
+    
+    size_t music() {
+        size_t music_sum=0;
+        for (size_t i = 0 ; i< size(); ++i) {
+            music_sum += ptr()[i];
+        }
+        return music_sum;
     }
     
     void store(const char* input) {
         printf("%lu %lu\n", size(), framesize*samplesize*channels);
-        memcpy((char*)input, ptr(), framesize * samplesize * channels);
+        memcpy(ptr(), (char*)input, framesize * samplesize * channels);
     }
     
-    int wav2mpg();
-    int mpg2wav();
-    int upd2wav();
-    int wav2udp();
+    int wav2mpeg(audiocodec& codec);
+    int mpeg2wav(audiocodec& codec);
+    int udp2mpeg();
+    int mpeg2udp();
     
     enum BufferType {raw, codec, udp};
     
     BufferType type;
     
 private:
-    std::vector<char> mpegbuffer;
+    std::vector<unsigned char> mpegbuffer;
     uint64_t samplingrate;
     int channels;
     size_t framesize;
     size_t samplesize;
-    std::vector<char> audio;
     uint64_t frameindex;
 };
 

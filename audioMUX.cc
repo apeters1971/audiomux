@@ -116,12 +116,13 @@ static int recordCallback( const void *inputBuffer, void *outputBuffer,
     audio->set_frameindex(data->frameIndex);
     audio->store((char*)inputBuffer);
     audioq.add_output(audio);
-    
-    printf("output-queue: %lu\n", audioq.output_size());
+    int code_len = audio->wav2mpeg(audiocoder);
+    printf("output-queue: %lu len=%d music=%lx\n", audioq.output_size(),code_len, audio->music());
     return finished;
 }
 
-/* This routine will be called by the PortAudio engine when audio is needed.
+/* This routine will be called by the PortAudio engin
+ e when audio is needed.
 ** It may be called at interrupt level on some machines so don't do anything
 ** that could mess up the system like calling malloc() or free().
 */
