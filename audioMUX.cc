@@ -8,6 +8,7 @@
 #include <stdlib.h>
 #include "portaudio.h"
 #include "audiobuffer.hpp"
+#include <sys/time.h>
 
 /* #define SAMPLE_RATE  (17932) // Test failure to open with this value. */
 #define SAMPLE_RATE  (48000)
@@ -55,6 +56,14 @@ audiobuffermanager audiomanager;
 audioqueue audioq;
 audiocodec audiocoder;
 
+
+
+double interval(struct timeval& tv1, struct timeval& tv2)
+{
+    return (((tv2.tv_sec-tv1.tv_sec)*1000000) - (tv2.tv_usec-tv1.tv_usec))/1000.0;
+}
+
+
 /* This routine will be called by the PortAudio engine when audio is needed.
 ** It may be called at interrupt level on some machines so don't do anything
 ** that could mess up the system like calling malloc() or free().
@@ -65,6 +74,9 @@ static int recordCallback( const void *inputBuffer, void *outputBuffer,
                            PaStreamCallbackFlags statusFlags,
                            void *userData )
 {
+    struct timezone tz;
+    struct timeval tv1,tv2,tv3,tv4;
+    
     paTestData *data = (paTestData*)userData;
     const SAMPLE *rptr = (const SAMPLE*)inputBuffer;
     SAMPLE *wptr = &data->recordedSamples[data->frameIndex * NUM_CHANNELS];
@@ -73,7 +85,7 @@ static int recordCallback( const void *inputBuffer, void *outputBuffer,
     int finished;
     unsigned long framesLeft = data->maxFrameIndex - data->frameIndex;
 
-    printf("%d\n", data->frameIndex);
+    //printf("%d\n", data->frameIndex);
     (void) outputBuffer; /* Prevent unused variable warnings. */
     (void) timeInfo;
     (void) statusFlags;
@@ -109,15 +121,29 @@ static int recordCallback( const void *inputBuffer, void *outputBuffer,
     }
     */
 
-   
+    gettimeofday(&tv1,&tz);
+    
     data->frameIndex += framesToCalc;
     
     audiobuffermanager::shared_buffer audio = audiomanager.get_buffer();
     audio->set_frameindex(data->frameIndex);
     audio->store((char*)inputBuffer);
     audioq.add_output(audio);
+    gettimeofday(&tv2,&tz);
     int code_len = audio->wav2mpeg(audiocoder);
-    printf("output-queue: %lu len=%d music=%lx\n", audioq.output_size(),code_len, audio->music());
+    gettimeofday(&tv3,&tz);
+    int decode_len = audio->mpeg2wav(audiocoder);
+    gettimeofday(&tv4,&tz);
+    
+    printf("output-queue: %lu len=%d decode-len=%d music=%lx t_store:%.03f t_enc:%.03f t_dec=%.03f\n",
+           audioq.output_size(),
+           code_len,
+           decode_len,
+           audio->music(),
+           interval(tv2,tv1),
+           interval(tv3,tv2),
+           interval(tv4,tv3)
+           );
     return finished;
 }
 

@@ -44,7 +44,7 @@ public:
     audiobuffer(size_t _samplingrate,
                 int _channels,
                 size_t _framesize,
-                size_t _samplesize) : samplingrate(_samplingrate), channels(_channels), framesize(_framesize), samplesize(_samplesize)
+                size_t _samplesize) : samplingrate(_samplingrate), channels(_channels), framesize(_framesize), samplesize(_samplesize), type(eEMPTY)
     {
         printf("buffer %lu\n", framesize*channels*samplesize);
         reserve(framesize*channels*samplesize);
@@ -54,7 +54,7 @@ public:
     
     audiobuffer(size_t _samplingrate,
                 int _channels,
-                size_t _framesize) : samplingrate(_samplingrate), channels(_channels), framesize(_framesize)
+                size_t _framesize) : samplingrate(_samplingrate), channels(_channels), framesize(_framesize), type(eEMPTY)
     {
         samplesize=2;
         printf("buffer %lu\n", framesize*channels*samplesize);
@@ -106,6 +106,7 @@ public:
     void store(const char* input) {
         printf("%lu %lu\n", size(), framesize*samplesize*channels);
         memcpy(ptr(), (char*)input, framesize * samplesize * channels);
+        type = eWAV;
     }
     
     int wav2mpeg(audiocodec& codec);
@@ -113,7 +114,7 @@ public:
     int udp2mpeg();
     int mpeg2udp();
     
-    enum BufferType {raw, codec, udp};
+    enum BufferType {eEMPTY, eWAV, eMPEG, eUDP};
     
     BufferType type;
     

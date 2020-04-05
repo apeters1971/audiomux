@@ -41,12 +41,15 @@ audiobuffer::wav2mpeg(audiocodec& codec){
     fprintf(stdout,"info: capacity=%lu framesize=%lu\n", mpegbuffer.capacity(), framesize);
     
     int len = opus_encode(codec.getEncoder(),
-        (const opus_int16 *) ptr(), framesize, (unsigned char*) mpegptr(),
-                      mpegbuffer.capacity());
+                          (const opus_int16 *) ptr(),
+                          framesize,
+                          (unsigned char*) mpegptr(),
+                          mpegbuffer.capacity());
     if (len < 0) {
         fprintf(stderr,"error: encoder returned %d as len\n", len);
     } else {
         fprintf(stdout,"info: encoder returned %d as len\n", len);
+        type = eMPEG;
     }
     mpegbuffer.resize(len);
     return len;
@@ -55,7 +58,21 @@ audiobuffer::wav2mpeg(audiocodec& codec){
 int
 audiobuffer::mpeg2wav(audiocodec& codec)
 {
-    return 0;
+    fprintf(stdout,"info: capacity=%lu framesize=%lu\n", mpegbuffer.capacity(), framesize);
+    
+    int len = opus_decode(codec.getDecoder(),
+                           (const unsigned char*) mpegptr(),
+                           mpegbuffer.size(),
+                           (opus_int16 *) ptr(),
+                           capacity(),
+                           0);
+    
+    if (len != framesize) {
+        fprintf(stderr,"error: deocder returned %d as len\n", len);
+    } else {
+        type = eWAV;
+    }
+    return len;
 }
 
 int
