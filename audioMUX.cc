@@ -11,6 +11,7 @@
 
 /* #define SAMPLE_RATE  (17932) // Test failure to open with this value. */
 #define SAMPLE_RATE  (48000)
+#define MPEG_BIT_RATE 192000
 #define FRAMES_PER_BUFFER (120)
 #define NUM_SECONDS     (5)
 #define NUM_CHANNELS    (2)
@@ -52,7 +53,7 @@ paTestData;
 
 audiobuffermanager audiomanager;
 audioqueue audioq;
-
+audiocodec audiocoder;
 
 /* This routine will be called by the PortAudio engine when audio is needed.
 ** It may be called at interrupt level on some machines so don't do anything
@@ -195,7 +196,8 @@ int main(void)
     
     audiomanager.configure(SAMPLE_RATE/FRAMES_PER_BUFFER, SAMPLE_RATE, NUM_CHANNELS, FRAMES_PER_BUFFER, sizeof(SAMPLE) );
     audiomanager.reserve(SAMPLE_RATE/FRAMES_PER_BUFFER);
-    
+    audiocoder.configure(SAMPLE_RATE, NUM_CHANNELS, MPEG_BIT_RATE );
+                         
     if( data.recordedSamples == NULL )
     {
         printf("Could not allocate record array.\n");
