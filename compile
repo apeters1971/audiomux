@@ -1,0 +1,1 @@
+g++ -o audioMUX audioMUX.cc audiobuffer.cpp -lportaudio -lopus -I/usr/local/include/opus/
