@@ -15,7 +15,7 @@
 #include <queue>
 #include <mutex>
 #include <deque>
-
+#include <sys/time.h>
 #include "opus.h"
 
 class audiocodec {
@@ -44,7 +44,7 @@ public:
     audiobuffer(size_t _samplingrate,
                 int _channels,
                 size_t _framesize,
-                size_t _samplesize) : samplingrate(_samplingrate), channels(_channels), framesize(_framesize), samplesize(_samplesize), type(eEMPTY)
+                size_t _samplesize) : samplingrate(_samplingrate), channels(_channels), framesize(_framesize), samplesize(_samplesize), type(eEMPTY), debug(false)
     {
         printf("buffer %lu\n", framesize*channels*samplesize);
         reserve(framesize*channels*samplesize);
@@ -57,9 +57,13 @@ public:
                 size_t _framesize) : samplingrate(_samplingrate), channels(_channels), framesize(_framesize), type(eEMPTY)
     {
         samplesize=2;
+
         printf("buffer %lu\n", framesize*channels*samplesize);
+    
         reserve(framesize*channels*samplesize);
         resize(framesize*channels*samplesize);
+        
+        printf("buffer size %lu\n", size());
         silence();
         samplesize=2;
         mpegbuffer.reserve(1500);
@@ -69,8 +73,8 @@ public:
     
     virtual ~audiobuffer() {}
     
-    void set_samplesize(size_t size) {
-        samplesize = size;
+    void set_samplesize(size_t _size) {
+        samplesize = _size;
         reserve(framesize*channels*samplesize);
         resize(framesize*channels*samplesize);
     }   
@@ -104,9 +108,21 @@ public:
     }
     
     void store(const char* input) {
-        printf("%lu %lu\n", size(), framesize*samplesize*channels);
+        if (debug) {
+            printf("%lu %lu\n", size(), framesize*samplesize*channels);
+        }
+        gettimeofday(&store_tv, &store_tz);
         memcpy(ptr(), (char*)input, framesize * samplesize * channels);
         type = eWAV;
+    }
+    
+    float age_in_ms() {
+        struct timeval tv;
+        struct timezone tz;
+        
+        gettimeofday(&tv, &tz);
+        
+        return (((tv.tv_sec-store_tv.tv_sec)*1000000.0) + (tv.tv_usec-store_tv.tv_usec))/1000.0;
     }
     
     int wav2mpeg(audiocodec& codec);
@@ -118,6 +134,8 @@ public:
     
     BufferType type;
     
+    size_t getFramesize() {return framesize;}
+    
 private:
     std::vector<unsigned char> mpegbuffer;
     uint64_t samplingrate;
@@ -125,6 +143,9 @@ private:
     size_t framesize;
     size_t samplesize;
     uint64_t frameindex;
+    struct timeval store_tv;
+    struct timezone store_tz;
+    bool debug;
 };
 
 class audiobuffermanager {
@@ -261,8 +282,25 @@ public:
         n_input++;
     }
     
+    audiobuffermanager::shared_buffer get_output() {
+        std::lock_guard<std::mutex> guard(mMutex);
+        audiobuffermanager::shared_buffer audio = output.front();
+        output.pop_front();
+        n_output--;
+        return audio;
+    }
+    
+    audiobuffermanager::shared_buffer get_input() {
+        std::lock_guard<std::mutex> guard(mMutex);
+        audiobuffermanager::shared_buffer audio = input.front();
+        input.pop_front();
+        n_input--;
+        return audio;
+    }
+    
+
     size_t output_size() { return n_output; }
-    size_t inptut_size() { return n_input; }
+    size_t input_size() { return n_input; }
     
 private:
     size_t n_output;

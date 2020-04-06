@@ -9,6 +9,7 @@
 #include "portaudio.h"
 #include "audiobuffer.hpp"
 #include <sys/time.h>
+#include <thread>
 
 /* #define SAMPLE_RATE  (17932) // Test failure to open with this value. */
 #define SAMPLE_RATE  (48000)
@@ -22,45 +23,25 @@
 #define WRITE_TO_FILE   (0)
 
 /* Select sample format. */
-#if 1
-#define PA_SAMPLE_TYPE  paFloat32
-typedef float SAMPLE;
-#define SAMPLE_SILENCE  (0.0f)
-#define PRINTF_S_FORMAT "%.8f"
-#elif 1
+
 #define PA_SAMPLE_TYPE  paInt16
 typedef short SAMPLE;
 #define SAMPLE_SILENCE  (0)
 #define PRINTF_S_FORMAT "%d"
-#elif 0
-#define PA_SAMPLE_TYPE  paInt8
-typedef char SAMPLE;
-#define SAMPLE_SILENCE  (0)
-#define PRINTF_S_FORMAT "%d"
-#else
-#define PA_SAMPLE_TYPE  paUInt8
-typedef unsigned char SAMPLE;
-#define SAMPLE_SILENCE  (128)
-#define PRINTF_S_FORMAT "%d"
-#endif
 
-typedef struct
-{
-    int          frameIndex;  /* Index into sample array. */
-    int          maxFrameIndex;
-    SAMPLE      *recordedSamples;
-}
-paTestData;
 
-audiobuffermanager audiomanager;
-audioqueue audioq;
-audiocodec audiocoder;
+audiobuffermanager audiomanager_w;
+audioqueue audioq_w;
+audiocodec audiocoder_w;
 
+audiobuffermanager audiomanager_r;
+audioqueue audioq_r;
+audiocodec audiocoder_r;
 
 
 double interval(struct timeval& tv1, struct timeval& tv2)
 {
-    return (((tv2.tv_sec-tv1.tv_sec)*1000000) - (tv2.tv_usec-tv1.tv_usec))/1000.0;
+    return (((tv2.tv_sec-tv1.tv_sec)*1000000) + (tv2.tv_usec-tv1.tv_usec))/1000.0;
 }
 
 
@@ -76,74 +57,50 @@ static int recordCallback( const void *inputBuffer, void *outputBuffer,
 {
     struct timezone tz;
     struct timeval tv1,tv2,tv3,tv4;
-    
-    paTestData *data = (paTestData*)userData;
+    static size_t frameindex = 0;
+    static size_t callbacks=0;
     const SAMPLE *rptr = (const SAMPLE*)inputBuffer;
-    SAMPLE *wptr = &data->recordedSamples[data->frameIndex * NUM_CHANNELS];
     long framesToCalc;
     long i;
     int finished;
-    unsigned long framesLeft = data->maxFrameIndex - data->frameIndex;
-
-    //printf("%d\n", data->frameIndex);
+    
+    
     (void) outputBuffer; /* Prevent unused variable warnings. */
     (void) timeInfo;
     (void) statusFlags;
     (void) userData;
 
-    if( framesLeft < framesPerBuffer )
-    {
-        framesToCalc = framesLeft;
-        finished = paComplete;
-    }
-    else
-    {
-        framesToCalc = framesPerBuffer;
-        finished = paContinue;
-    }
 
-    /*
-    if( inputBuffer == NULL )
-    {
-        for( i=0; i<framesToCalc; i++ )
-        {
-            *wptr++ = SAMPLE_SILENCE;
-            if( NUM_CHANNELS == 2 ) *wptr++ = SAMPLE_SILENCE;
-        }
-    }
-    else
-    {
-        for( i=0; i<framesToCalc; i++ )
-        {
-            *wptr++ = *rptr++;
-            if( NUM_CHANNELS == 2 ) *wptr++ = *rptr++;
-        }
-    }
-    */
+    framesToCalc = framesPerBuffer;
+    finished = paContinue;
 
     gettimeofday(&tv1,&tz);
     
-    data->frameIndex += framesToCalc;
+    frameindex += framesToCalc;
     
-    audiobuffermanager::shared_buffer audio = audiomanager.get_buffer();
-    audio->set_frameindex(data->frameIndex);
+    callbacks++;
+    audiobuffermanager::shared_buffer audio = audiomanager_w.get_buffer();
+    audio->set_frameindex(frameindex);
     audio->store((char*)inputBuffer);
-    audioq.add_output(audio);
+    audioq_w.add_output(audio);
     gettimeofday(&tv2,&tz);
-    int code_len = audio->wav2mpeg(audiocoder);
+    int code_len = audio->wav2mpeg(audiocoder_w);
     gettimeofday(&tv3,&tz);
-    int decode_len = audio->mpeg2wav(audiocoder);
+    int decode_len = 0; //audio->mpeg2wav(audiocoder_w);
     gettimeofday(&tv4,&tz);
+
+    if (!(callbacks%400)) {
+        printf("output-queue: %lu len=%d decode-len=%d music=%lx t_store:%.03f t_enc:%.03f t_dec=%.03f\n",
+               audioq_w.output_size(),
+               code_len,
+               decode_len,
+               audio->music(),
+               interval(tv2,tv1),
+               interval(tv3,tv2),
+               interval(tv4,tv3)
+               );
+    }
     
-    printf("output-queue: %lu len=%d decode-len=%d music=%lx t_store:%.03f t_enc:%.03f t_dec=%.03f\n",
-           audioq.output_size(),
-           code_len,
-           decode_len,
-           audio->music(),
-           interval(tv2,tv1),
-           interval(tv3,tv2),
-           interval(tv4,tv3)
-           );
     return finished;
 }
 
@@ -158,87 +115,82 @@ static int playCallback( const void *inputBuffer, void *outputBuffer,
                          PaStreamCallbackFlags statusFlags,
                          void *userData )
 {
-    paTestData *data = (paTestData*)userData;
-    SAMPLE *rptr = &data->recordedSamples[data->frameIndex * NUM_CHANNELS];
+    static size_t frameindex=0;
+    SAMPLE *rptr = 0;//&data->recordedSamples[frameindex * NUM_CHANNELS];
     SAMPLE *wptr = (SAMPLE*)outputBuffer;
     unsigned int i;
     int finished;
-    unsigned int framesLeft = data->maxFrameIndex - data->frameIndex;
+    unsigned int framesLeft = frameindex;
 
     (void) inputBuffer; /* Prevent unused variable warnings. */
     (void) timeInfo;
     (void) statusFlags;
     (void) userData;
 
-    if( framesLeft < framesPerBuffer )
-    {
-        /* final buffer... */
-        for( i=0; i<framesLeft; i++ )
-        {
-            *wptr++ = *rptr++;  /* left */
-            if( NUM_CHANNELS == 2 ) *wptr++ = *rptr++;  /* right */
+    audiobuffermanager::shared_buffer audio;
+    fprintf(stdout, "info: queue size = %lu\n", audioq_w.output_size());
+    if (audioq_w.output_size()) {
+        // we have some audio to play
+        audio = audioq_w.get_output();
+        
+        if (audio) {
+            switch(audio->type) {
+                case audiobuffer::eWAV:
+                    fprintf(stderr,"info: found wav\n");
+                    break;
+                case audiobuffer::eMPEG:
+                    fprintf(stderr,"info: found mpeg\n");
+                    if (audio->mpeg2wav(audiocoder_w) != audio->getFramesize()) {
+                        audiomanager_w.put_buffer(audio);
+                        // play silence
+                        audio = nullptr;
+                    }
+                    break;
+                default:
+                    audiomanager_w.put_buffer(audio);
+                    // play silence
+                    audio = nullptr;
+                    break;
+                    
+            }
         }
-        for( ; i<framesPerBuffer; i++ )
-        {
-            *wptr++ = 0;  /* left */
-            if( NUM_CHANNELS == 2 ) *wptr++ = 0;  /* right */
+        if (audio) {
+            // copy the audio buffer
+            memcpy(outputBuffer, audio->ptr(), audio->size());
+            fprintf(stdout,"age=%.02f\n", audio->age_in_ms());
         }
-        data->frameIndex += framesLeft;
-        finished = paComplete;
     }
-    else
-    {
+    
+    if (!audio) {
+        // play some silence
         for( i=0; i<framesPerBuffer; i++ )
         {
-            *wptr++ = *rptr++;  /* left */
-            if( NUM_CHANNELS == 2 ) *wptr++ = *rptr++;  /* right */
+            *wptr++ = 0;
+            if( NUM_CHANNELS == 2 ) *wptr++ = 0;
+            //*wptr++ = *rptr++;  /* left */
+            //if( NUM_CHANNELS == 2 ) *wptr++ = *rptr++;  /* right */
         }
-        data->frameIndex += framesPerBuffer;
-        finished = paContinue;
     }
+    frameindex+= framesPerBuffer;
+    finished = paContinue;
+
     return finished;
 }
 
-int main(void)
+void recorder()
 {
-    PaStreamParameters  inputParameters,
-                        outputParameters;
+    PaStreamParameters  inputParameters;
     PaStream*           stream;
     PaError             err = paNoError;
-    paTestData          data;
-    int                 i;
-    int                 totalFrames;
-    int                 numSamples;
-    int                 numBytes;
-    SAMPLE              max, val;
-    double              average;
-
-    printf("patest_record.c\n"); fflush(stdout);
-
-    data.maxFrameIndex = totalFrames = NUM_SECONDS * SAMPLE_RATE; /* Record for a few seconds. */
-    data.frameIndex = 0;
-    numSamples = totalFrames * NUM_CHANNELS;
-    numBytes = numSamples * sizeof(SAMPLE);
-    data.recordedSamples = (SAMPLE *) malloc( numBytes ); /* From now on, recordedSamples is initialised. */
-    
-    audiomanager.configure(SAMPLE_RATE/FRAMES_PER_BUFFER, SAMPLE_RATE, NUM_CHANNELS, FRAMES_PER_BUFFER, sizeof(SAMPLE) );
-    audiomanager.reserve(SAMPLE_RATE/FRAMES_PER_BUFFER);
-    audiocoder.configure(SAMPLE_RATE, NUM_CHANNELS, MPEG_BIT_RATE );
-                         
-    if( data.recordedSamples == NULL )
-    {
-        printf("Could not allocate record array.\n");
-        goto done;
-    }
-    for( i=0; i<numSamples; i++ ) data.recordedSamples[i] = 0;
-
-    err = Pa_Initialize();
-    if( err != paNoError ) goto done;
+       
+    audiomanager_w.configure(SAMPLE_RATE/FRAMES_PER_BUFFER, SAMPLE_RATE, NUM_CHANNELS, FRAMES_PER_BUFFER, sizeof(SAMPLE) );
+    audiomanager_w.reserve(SAMPLE_RATE/FRAMES_PER_BUFFER);
+    audiocoder_w.configure(SAMPLE_RATE, NUM_CHANNELS, MPEG_BIT_RATE );
 
     inputParameters.device = Pa_GetDefaultInputDevice(); /* default input device */
     if (inputParameters.device == paNoDevice) {
         fprintf(stderr,"Error: No default input device.\n");
-        goto done;
+        goto done_rec;
     }
     inputParameters.channelCount = 2;                    /* stereo input */
     inputParameters.sampleFormat = PA_SAMPLE_TYPE;
@@ -254,63 +206,45 @@ int main(void)
               FRAMES_PER_BUFFER,
               paClipOff,      /* we won't output out of range samples so don't bother clipping them */
               recordCallback,
-              &data );
-    if( err != paNoError ) goto done;
+              0 );
+    if( err != paNoError ) goto done_rec;
 
     err = Pa_StartStream( stream );
-    if( err != paNoError ) goto done;
+    if( err != paNoError ) goto done_rec;
     printf("\n=== Now recording!! Please speak into the microphone. ===\n"); fflush(stdout);
 
     while( ( err = Pa_IsStreamActive( stream ) ) == 1 )
     {
         Pa_Sleep(1000);
-        printf("index = %d\n", data.frameIndex ); fflush(stdout);
     }
-    if( err < 0 ) goto done;
+    if( err < 0 ) goto done_rec;
 
     err = Pa_CloseStream( stream );
-    if( err != paNoError ) goto done;
-
-    /* Measure maximum peak amplitude. */
-    max = 0;
-    average = 0.0;
-    for( i=0; i<numSamples; i++ )
+    
+    
+done_rec:
+    Pa_Terminate();
+    
+    if( err != paNoError )
     {
-        val = data.recordedSamples[i];
-        if( val < 0 ) val = -val; /* ABS */
-        if( val > max )
-        {
-            max = val;
-        }
-        average += val;
+        fprintf( stderr, "An error occured while using the portaudio stream\n" );
+        fprintf( stderr, "Error number: %d\n", err );
+        fprintf( stderr, "Error message: %s\n", Pa_GetErrorText( err ) );
+        err = 1;          /* Always return 0 or 1, but no other return codes. */
     }
+}
 
-    average = average / (double)numSamples;
+void player()
+{
+    PaStreamParameters  outputParameters;
+    PaStream*           stream;
+    PaError             err = paNoError;
 
-    printf("sample max amplitude = "PRINTF_S_FORMAT"\n", max );
-    printf("sample average = %lf\n", average );
 
-    /* Write recorded data to a file. */
-#if WRITE_TO_FILE
-    {
-        FILE  *fid;
-        fid = fopen("recorded.raw", "wb");
-        if( fid == NULL )
-        {
-            printf("Could not open file.");
-        }
-        else
-        {
-            fwrite( data.recordedSamples, NUM_CHANNELS * sizeof(SAMPLE), totalFrames, fid );
-            fclose( fid );
-            printf("Wrote data to 'recorded.raw'\n");
-        }
-    }
-#endif
-
-    /* Playback recorded data.  -------------------------------------------- */
-    data.frameIndex = 0;
-
+    audiomanager_r.configure(SAMPLE_RATE/FRAMES_PER_BUFFER, SAMPLE_RATE, NUM_CHANNELS, FRAMES_PER_BUFFER, sizeof(SAMPLE) );
+    audiomanager_r.reserve(SAMPLE_RATE/FRAMES_PER_BUFFER);
+    audiocoder_r.configure(SAMPLE_RATE, NUM_CHANNELS, MPEG_BIT_RATE );
+      
     outputParameters.device = Pa_GetDefaultOutputDevice(); /* default output device */
     if (outputParameters.device == paNoDevice) {
         fprintf(stderr,"Error: No default output device.\n");
@@ -320,26 +254,26 @@ int main(void)
     outputParameters.sampleFormat =  PA_SAMPLE_TYPE;
     outputParameters.suggestedLatency = Pa_GetDeviceInfo( outputParameters.device )->defaultLowOutputLatency;
     outputParameters.hostApiSpecificStreamInfo = NULL;
-
+    
     printf("\n=== Now playing back. ===\n"); fflush(stdout);
     err = Pa_OpenStream(
-              &stream,
-              NULL, /* no input */
-              &outputParameters,
-              SAMPLE_RATE,
-              FRAMES_PER_BUFFER,
-              paClipOff,      /* we won't output out of range samples so don't bother clipping them */
-              playCallback,
-              &data );
+                        &stream,
+                        NULL, /* no input */
+                        &outputParameters,
+                        SAMPLE_RATE,
+                        FRAMES_PER_BUFFER,
+                        paClipOff,      /* we won't output out of range samples so don't bother clipping them */
+                        playCallback,
+                        0 );
     if( err != paNoError ) goto done;
-
+    
     if( stream )
     {
         err = Pa_StartStream( stream );
         if( err != paNoError ) goto done;
         
         printf("Waiting for playback to finish.\n"); fflush(stdout);
-
+        
         while( ( err = Pa_IsStreamActive( stream ) ) == 1 ) Pa_Sleep(100);
         if( err < 0 ) goto done;
         
@@ -348,11 +282,10 @@ int main(void)
         
         printf("Done.\n"); fflush(stdout);
     }
-
+    
 done:
     Pa_Terminate();
-    if( data.recordedSamples )       /* Sure it is NULL or valid. */
-        free( data.recordedSamples );
+
     if( err != paNoError )
     {
         fprintf( stderr, "An error occured while using the portaudio stream\n" );
@@ -360,6 +293,18 @@ done:
         fprintf( stderr, "Error message: %s\n", Pa_GetErrorText( err ) );
         err = 1;          /* Always return 0 or 1, but no other return codes. */
     }
-    return err;
+}
+
+
+int main(void)
+{
+    if( Pa_Initialize() != paNoError ) {
+        fprintf(stderr,"error: failed to initialize port audio\n");
+        exit(-1);
+    }
+    std::thread recorderThread(recorder);
+    std::thread playerThread(player);
+    recorderThread.join();
+    playerThread.join();
 }
 
