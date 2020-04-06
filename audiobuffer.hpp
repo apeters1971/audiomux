@@ -16,6 +16,10 @@
 #include <mutex>
 #include <deque>
 #include <sys/time.h>
+#include <sys/socket.h>
+#include <arpa/inet.h>
+#include <netinet/in.h>
+#include <unistd.h>
 #include "opus.h"
 
 class audiocodec {
@@ -57,9 +61,9 @@ public:
                 size_t _framesize) : samplingrate(_samplingrate), channels(_channels), framesize(_framesize), type(eEMPTY)
     {
         samplesize=2;
-
+        
         printf("buffer %lu\n", framesize*channels*samplesize);
-    
+        
         reserve(framesize*channels*samplesize);
         resize(framesize*channels*samplesize);
         
@@ -68,7 +72,7 @@ public:
         samplesize=2;
         mpegbuffer.reserve(1500);
         mpegbuffer.resize(1500);
-  
+        
     }
     
     virtual ~audiobuffer() {}
@@ -92,11 +96,11 @@ public:
     }
     
     unsigned char* ptr() {
-      return &(operator[](0));
+        return &(operator[](0));
     }
     
     unsigned char* mpegptr() {
-      return &(mpegbuffer[0]);
+        return &(mpegbuffer[0]);
     }
     
     size_t music() {
@@ -162,7 +166,7 @@ public:
     virtual ~audiobuffermanager(){}
     
     typedef std::shared_ptr<audiobuffer> shared_buffer;
-
+    
     void configure(size_t _max,
                    size_t _samplingrate,
                    int _channels,
@@ -177,7 +181,7 @@ public:
         framesize = _framesize;
         samplesize = _samplesize;
     }
-
+    
     
     void reserve(size_t n) {
         // create <n> buffers in the manager if less than max
@@ -193,11 +197,11 @@ public:
     shared_buffer get_buffer()
     {
         std::lock_guard<std::mutex> guard(mMutex);
-
+        
         if (!queue.size()) {
             
             shared_buffer buf = std::make_shared<audiobuffer>(
-                                                 samplingrate, channels, framesize);
+                                                              samplingrate, channels, framesize);
             buf->set_samplesize(samplesize);
             inflight_size += buf->size();
             return buf;
@@ -215,13 +219,13 @@ public:
     void put_buffer(shared_buffer buffer)
     {
         std::lock_guard<std::mutex> guard(mMutex);
-
+        
         if (inflight_size >= buffer->capacity()) {
             inflight_size -= buffer->capacity();
         } else {
             inflight_size = 0;
         }
-
+        
         if (queue.size() == max) {
             printf("# created audio buffer : size=%lu\n", queue.size());
             return;
@@ -242,7 +246,7 @@ public:
         std::lock_guard<std::mutex> guard(mMutex);
         return queued_size;
     }
-
+    
     const size_t inflight()
     {
         std::lock_guard<std::mutex> guard(mMutex);
@@ -298,7 +302,7 @@ public:
         return audio;
     }
     
-
+    
     size_t output_size() { return n_output; }
     size_t input_size() { return n_input; }
     
@@ -309,5 +313,34 @@ private:
     std::deque<audiobuffermanager::shared_buffer> input;
     std::deque<audiobuffermanager::shared_buffer> output;
 };
+
+
+class audiosocket {
+public:
+    audiosocket() : sockfd_w(-1), sockfd_r(-1) {}
+    ~audiosocket(){}
+    
+    int connect(std::string destination, int port=8080);
+    int disconnect();
+    
+    int bind(int port=8080);
+    
+    std::string getip(struct sockaddr_in* res);
+    
+private:
+    
+    int sockfd_w;
+    std::string destinationhost;
+    
+    int destinationport;
+    struct sockaddr_in destinationaddr;
+    
+    int sockfd_r;
+    int receiverport;
+    
+    struct sockaddr_in receiveraddr;
+    
+};
+
 
 #endif /* audiobuffer_hpp */
