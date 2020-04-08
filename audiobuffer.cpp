@@ -119,7 +119,7 @@ audiosocket::connect(std::string destination,
                      std::string yourname,
                      int port)
 {
-    if (sockfd_w > 0)
+    if (sockfd > 0)
         return -1;
     
     socketname = yourname;
@@ -127,7 +127,7 @@ audiosocket::connect(std::string destination,
     destinationport = port;
     
     // Creating socket file descriptor
-    if ( (sockfd_w = socket(AF_INET, SOCK_DGRAM, 0)) < 0 ) {
+    if ( (sockfd = socket(AF_INET, SOCK_DGRAM, 0)) < 0 ) {
         fprintf(stderr,"error: socket creation failed\n");
         return -1;
     }
@@ -145,11 +145,11 @@ audiosocket::connect(std::string destination,
 int
 audiosocket::disconnect()
 {
-    if (sockfd_w < 0) {
+    if (sockfd < 0) {
         return -1;
     } else {
-        close(sockfd_w);
-        sockfd_w = -1;
+        close(sockfd);
+        sockfd = -1;
     }
     
     return 0;
@@ -161,7 +161,7 @@ audiosocket::bind(int port)
     receiverport = port;
     
     // Creating socket file descriptor
-    if ( (sockfd_r = socket(AF_INET, SOCK_DGRAM, 0)) < 0 ) {
+    if ( (sockfd = socket(AF_INET, SOCK_DGRAM, 0)) < 0 ) {
         fprintf(stderr,"error: socket creation failed\n");
         return -1;
     }
@@ -174,7 +174,7 @@ audiosocket::bind(int port)
     receiveraddr.sin_port = htons(receiverport);
     
     // Bind the socket with the server address
-    if ( ::bind(sockfd_r, (const struct sockaddr *)&receiveraddr,
+    if ( ::bind(sockfd, (const struct sockaddr *)&receiveraddr,
                 sizeof(receiveraddr)) < 0 )
     {
         fprintf(stderr,"error:bind failed\n");
@@ -213,18 +213,18 @@ audiosocket::getip(struct sockaddr_in* res)
 int
 audiosocket::send(void* buffer, size_t len)
 {
-    int rc = sendto(sockfd_w, (char *)buffer, len, 0, (const struct sockaddr *) &destinationaddr, sizeof(destinationaddr));
+    int rc = sendto(sockfd, (char *)buffer, len, 0, (const struct sockaddr *) &destinationaddr, sizeof(destinationaddr));
     return rc;
 }
 
 
 audio_t*
-audiosocket::receive(bool fromwriter){
+audiosocket::receive(){
     static struct audio_t udpaudio;
     static struct sockaddr_in cliaddr;
     static socklen_t len;
     udpaudio.len = 0;
-    ssize_t n = recvfrom(fromwriter?sockfd_w:sockfd_r, (char *)&udpaudio, 64+1440,
+    ssize_t n = recvfrom(sockfd, (char *)&udpaudio, 64+1440,
                          MSG_WAITALL, ( struct sockaddr *) &cliaddr,
                          &len);
     

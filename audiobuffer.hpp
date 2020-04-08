@@ -35,7 +35,7 @@ struct audio_t {
 
 class audiosocket {
 public:
-    audiosocket() : sockfd_w(-1), sockfd_r(-1) {}
+    audiosocket() : sockfd(-1) {}
     ~audiosocket(){}
     
     int connect(std::string destination, std::string name, int port=8080);
@@ -47,19 +47,18 @@ public:
     
     
     int send(void* buff, size_t len);
-    audio_t* receive(bool fromwriter=false);
+    audio_t* receive();
     
     const char* name() { return socketname.c_str(); }
     
 private:
     
-    int sockfd_w;
+    int sockfd;
     std::string destinationhost;
     
     int destinationport;
     struct sockaddr_in destinationaddr;
-    
-    int sockfd_r;
+
     int receiverport;
     
     struct sockaddr_in receiveraddr;

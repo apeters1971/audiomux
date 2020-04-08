@@ -1,1 +1,2 @@
-g++ -o audioMUX audioMUX.cc audiobuffer.cpp -lportaudio -lopus -I/usr/local/include/opus/
+g++ -o audioMUX audioMUX.cc audiobuffer.cpp -lportaudio -lopus -I/usr/local/include/opus/ -I/usr/include/opus/
+g++ -o audioSERV audioSERV.cc audiobuffer.cpp -lportaudio -lopus -I/usr/local/include/opus/ -I/usr/include/opus/

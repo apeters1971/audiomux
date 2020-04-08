@@ -97,7 +97,7 @@ static int recordCallback( const void *inputBuffer, void *outputBuffer,
     
     /*
     audiobuffermanager::shared_buffer audio_r = audiomanager_w.get_buffer();
-    struct audio_t* udpaudio = audiosock.receive(true);
+    struct audio_t* udpaudio = audiosock.receive();
     
     if (udpaudio) {
         printf("%lu %lu\n", udpaudio->frame, udpaudio->len);
@@ -334,7 +334,7 @@ void udpreceiver()
     size_t lastframe=0;
     do {
         audiobuffermanager::shared_buffer audio = audiomanager_w.get_buffer();
-        struct audio_t* udpaudio = audiosock.receive(true);
+        struct audio_t* udpaudio = audiosock.receive();
         if (udpaudio) {
             fprintf(stdout,"frame=%lu last-frame=%lu diff=%d\n", udpaudio->frame, lastframe, udpaudio->frame-lastframe);
             lastframe = udpaudio->frame;
