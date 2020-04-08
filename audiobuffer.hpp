@@ -22,6 +22,51 @@
 #include <unistd.h>
 #include "opus.h"
 
+struct audio_t {
+    audio_t() : len(0), frame(0), c_s(0), c_us(0) {}
+    ~audio_t() {}
+    uint64_t frame;
+    uint64_t len;
+    uint64_t c_s;
+    uint64_t c_us;
+    char name[32];
+    unsigned char buffer[1440];
+};
+
+class audiosocket {
+public:
+    audiosocket() : sockfd_w(-1), sockfd_r(-1) {}
+    ~audiosocket(){}
+    
+    int connect(std::string destination, std::string name, int port=8080);
+    int disconnect();
+    
+    int bind(int port=8080);
+    
+    std::string getip(struct sockaddr_in* res);
+    
+    
+    int send(void* buff, size_t len);
+    audio_t* receive(bool fromwriter=false);
+    
+    const char* name() { return socketname.c_str(); }
+    
+private:
+    
+    int sockfd_w;
+    std::string destinationhost;
+    
+    int destinationport;
+    struct sockaddr_in destinationaddr;
+    
+    int sockfd_r;
+    int receiverport;
+    
+    struct sockaddr_in receiveraddr;
+    std::string socketname;
+};
+
+
 class audiocodec {
 public:
     audiocodec() {encoder = NULL; decoder = NULL;}
@@ -35,9 +80,13 @@ public:
         }
     }
     
-    OpusEncoder* getEncoder() {return encoder;}
-    OpusDecoder* getDecoder() {return decoder;}
+    OpusEncoder* getEncoder() {mMutex.lock(); return encoder;}
+    OpusDecoder* getDecoder() {mMutex.lock(); return decoder;}
+    void releaseCodec() {mMutex.unlock();}
+    
 private:
+    
+    std::mutex mMutex;
     
     OpusEncoder* encoder;
     OpusDecoder* decoder;
@@ -50,7 +99,7 @@ public:
                 size_t _framesize,
                 size_t _samplesize) : samplingrate(_samplingrate), channels(_channels), framesize(_framesize), samplesize(_samplesize), type(eEMPTY), debug(false)
     {
-        printf("buffer %lu\n", framesize*channels*samplesize);
+        //printf("buffer %lu\n", framesize*channels*samplesize);
         reserve(framesize*channels*samplesize);
         resize(framesize*channels*samplesize);
         silence();
@@ -62,12 +111,12 @@ public:
     {
         samplesize=2;
         
-        printf("buffer %lu\n", framesize*channels*samplesize);
+        //printf("buffer %lu\n", framesize*channels*samplesize);
         
         reserve(framesize*channels*samplesize);
         resize(framesize*channels*samplesize);
         
-        printf("buffer size %lu\n", size());
+        //printf("buffer size %lu\n", size());
         silence();
         samplesize=2;
         mpegbuffer.reserve(1500);
@@ -76,12 +125,12 @@ public:
     }
     
     virtual ~audiobuffer() {}
-    
+        
     void set_samplesize(size_t _size) {
         samplesize = _size;
         reserve(framesize*channels*samplesize);
         resize(framesize*channels*samplesize);
-    }   
+    }
     
     void set_frameindex(uint64_t index) {
         frameindex = index;
@@ -103,6 +152,10 @@ public:
         return &(mpegbuffer[0]);
     }
     
+    size_t mpegsize() {
+        return mpegbuffer.size();
+    }
+    
     size_t music() {
         size_t music_sum=0;
         for (size_t i = 0 ; i< size(); ++i) {
@@ -120,6 +173,15 @@ public:
         type = eWAV;
     }
     
+    void storempeg(void* buffer, size_t len, uint64_t time_s, uint64_t time_us)
+    {
+        mpegbuffer.resize(len);
+        memcpy(mpegptr(), (char*)buffer, len);
+        store_tv.tv_sec = time_s;
+        store_tv.tv_usec = time_us;
+        type = eMPEG;
+    }
+    
     float age_in_ms() {
         struct timeval tv;
         struct timezone tz;
@@ -131,10 +193,10 @@ public:
     
     int wav2mpeg(audiocodec& codec);
     int mpeg2wav(audiocodec& codec);
-    int udp2mpeg();
-    int mpeg2udp();
+    int udp2mpeg(audio_t* receivebuffer);
+    int mpeg2udp(audiosocket& audiosock);
     
-    enum BufferType {eEMPTY, eWAV, eMPEG, eUDP};
+    enum BufferType {eEMPTY, eWAV, eMPEG};
     
     BufferType type;
     
@@ -226,8 +288,8 @@ public:
             inflight_size = 0;
         }
         
-        if (queue.size() == max) {
-            printf("# created audio buffer : size=%lu\n", queue.size());
+        if (queue.size() > max) {
+            //printf("# dump audio buffer : size=%lu\n", queue.size());
             return;
         } else {
             queue.push(buffer);
@@ -236,7 +298,7 @@ public:
             buffer->shrink_to_fit();
             buffer->silence();
             queued_size += buffersize;
-            printf("# created audio buffer : size=%lu\n", queue.size());
+            //printf("# keep audio buffer : size=%lu\n", queue.size());
             return;
         }
     }
@@ -312,34 +374,6 @@ private:
     std::mutex mMutex;
     std::deque<audiobuffermanager::shared_buffer> input;
     std::deque<audiobuffermanager::shared_buffer> output;
-};
-
-
-class audiosocket {
-public:
-    audiosocket() : sockfd_w(-1), sockfd_r(-1) {}
-    ~audiosocket(){}
-    
-    int connect(std::string destination, int port=8080);
-    int disconnect();
-    
-    int bind(int port=8080);
-    
-    std::string getip(struct sockaddr_in* res);
-    
-private:
-    
-    int sockfd_w;
-    std::string destinationhost;
-    
-    int destinationport;
-    struct sockaddr_in destinationaddr;
-    
-    int sockfd_r;
-    int receiverport;
-    
-    struct sockaddr_in receiveraddr;
-    
 };
 
 

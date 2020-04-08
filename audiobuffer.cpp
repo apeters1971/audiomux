@@ -38,7 +38,7 @@ audiocodec::configure(int samplingrate, int channels, int bitrate)
 
 int
 audiobuffer::wav2mpeg(audiocodec& codec){
-    if (1) {
+    if (debug) {
         fprintf(stdout,"info: capacity=%lu framesize=%lu\n", mpegbuffer.capacity(), framesize);
     }
     
@@ -47,6 +47,8 @@ audiobuffer::wav2mpeg(audiocodec& codec){
                           framesize,
                           (unsigned char*) mpegptr(),
                           mpegbuffer.capacity());
+    codec.releaseCodec();
+    
     if (len < 0) {
         fprintf(stderr,"error: encoder returned %d as len\n", len);
     } else {
@@ -73,6 +75,8 @@ audiobuffer::mpeg2wav(audiocodec& codec)
                           framesize,
                           0);
     
+    codec.releaseCodec();
+    
     if (len != framesize) {
         fprintf(stderr,"error: deocder returned %d as len\n", len);
     } else {
@@ -83,25 +87,42 @@ audiobuffer::mpeg2wav(audiocodec& codec)
 }
 
 int
-audiobuffer::mpeg2udp()
+audiobuffer::mpeg2udp(audiosocket& audiosock)
 {
-    return 0;
+    static struct audio_t sendbuffer;
+    sendbuffer.frame++;
+    if (mpegsize() > sizeof(sendbuffer.buffer)) {
+        return -1;
+    }
+    
+    snprintf(sendbuffer.name, sizeof(sendbuffer.name), "%s", audiosock.name());
+    sendbuffer.len = mpegsize();
+    sendbuffer.c_s = store_tv.tv_sec;
+    sendbuffer.c_us = store_tv.tv_usec;
+    memcpy(sendbuffer.buffer,mpegptr(), mpegsize());
+    
+    return audiosock.send((void*)&sendbuffer, 64 + sendbuffer.len);
 }
 
 int
-audiobuffer::udp2mpeg()
+audiobuffer::udp2mpeg(audio_t* udpaudio)
 {
+    set_frameindex(udpaudio->frame);
+    storempeg(udpaudio->buffer, udpaudio->len, udpaudio->c_s, udpaudio->c_us);
     return 0;
 }
 
 
 
 int
-audiosocket::connect(std::string destination, int port)
+audiosocket::connect(std::string destination,
+                     std::string yourname,
+                     int port)
 {
     if (sockfd_w > 0)
         return -1;
     
+    socketname = yourname;
     destinationhost = destination;
     destinationport = port;
     
@@ -187,4 +208,31 @@ audiosocket::getip(struct sockaddr_in* res)
     ip = s;
     free(s);
     return ip;
+}
+
+int
+audiosocket::send(void* buffer, size_t len)
+{
+    int rc = sendto(sockfd_w, (char *)buffer, len, 0, (const struct sockaddr *) &destinationaddr, sizeof(destinationaddr));
+    return rc;
+}
+
+
+audio_t*
+audiosocket::receive(bool fromwriter){
+    static struct audio_t udpaudio;
+    static struct sockaddr_in cliaddr;
+    static socklen_t len;
+    udpaudio.len = 0;
+    ssize_t n = recvfrom(fromwriter?sockfd_w:sockfd_r, (char *)&udpaudio, 64+1440,
+                         MSG_WAITALL, ( struct sockaddr *) &cliaddr,
+                         &len);
+    
+    fprintf(stdout,"received %ld\n", n);
+    
+    if (n == (udpaudio.len+64)) {
+        return &udpaudio;
+    } else {
+        return 0;
+    }
 }

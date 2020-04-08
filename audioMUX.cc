@@ -38,6 +38,7 @@ audiobuffermanager audiomanager_r;
 audioqueue audioq_r;
 audiocodec audiocoder_r;
 
+audiosocket audiosock;
 
 double interval(struct timeval& tv1, struct timeval& tv2)
 {
@@ -82,18 +83,40 @@ static int recordCallback( const void *inputBuffer, void *outputBuffer,
     audiobuffermanager::shared_buffer audio = audiomanager_w.get_buffer();
     audio->set_frameindex(frameindex);
     audio->store((char*)inputBuffer);
-    audioq_w.add_output(audio);
+    //audioq_w.add_output(audio);
     gettimeofday(&tv2,&tz);
     int code_len = audio->wav2mpeg(audiocoder_w);
     gettimeofday(&tv3,&tz);
     int decode_len = 0; //audio->mpeg2wav(audiocoder_w);
     gettimeofday(&tv4,&tz);
 
+    int send_len = audio->mpeg2udp(audiosock);
+    
+    audiomanager_w.put_buffer(audio);
+    //audioq_w.add_output(audio);
+    
+    /*
+    audiobuffermanager::shared_buffer audio_r = audiomanager_w.get_buffer();
+    struct audio_t* udpaudio = audiosock.receive(true);
+    
+    if (udpaudio) {
+        printf("%lu %lu\n", udpaudio->frame, udpaudio->len);
+        if (!audio_r->udp2mpeg(udpaudio)) {
+            if (audio_r->mpeg2wav(audiocoder_w) == audio_r->getFramesize()) {
+                // add it for playback
+                printf("adding to queue\n");
+                audioq_w.add_output(audio_r);
+            }
+        }
+    }
+    */
+
     if (!(callbacks%400)) {
-        printf("output-queue: %lu len=%d decode-len=%d music=%lx t_store:%.03f t_enc:%.03f t_dec=%.03f\n",
+        printf("output-queue: %lu len=%d decode-len=%d sent-len=%d music=%lx t_store:%.03f t_enc:%.03f t_dec=%.03f\n",
                audioq_w.output_size(),
                code_len,
                decode_len,
+               send_len,
                audio->music(),
                interval(tv2,tv1),
                interval(tv3,tv2),
@@ -128,8 +151,22 @@ static int playCallback( const void *inputBuffer, void *outputBuffer,
     (void) userData;
 
     audiobuffermanager::shared_buffer audio;
-    fprintf(stdout, "info: queue size = %lu\n", audioq_w.output_size());
+    //fprintf(stdout, "info: queue size = %lu\n", audioq_w.output_size());
+    
+    while (audioq_w.output_size()<1000) {
+        Pa_Sleep(10);
+        //fprintf(stdout, "info: queue size = %lu\n", audioq_w.output_size());
+    }
+    
+    if (0)
+    while (audioq_w.output_size()>100) {
+        // drop some frames
+        audio = audioq_w.get_output();
+        audiomanager_w.put_buffer(audio);
+    }
+    
     if (audioq_w.output_size()) {
+        fprintf(stdout, "info: queue size = %lu\n", audioq_w.output_size());
         // we have some audio to play
         audio = audioq_w.get_output();
         
@@ -182,11 +219,7 @@ void recorder()
     PaStreamParameters  inputParameters;
     PaStream*           stream;
     PaError             err = paNoError;
-       
-    audiomanager_w.configure(SAMPLE_RATE/FRAMES_PER_BUFFER, SAMPLE_RATE, NUM_CHANNELS, FRAMES_PER_BUFFER, sizeof(SAMPLE) );
-    audiomanager_w.reserve(SAMPLE_RATE/FRAMES_PER_BUFFER);
-    audiocoder_w.configure(SAMPLE_RATE, NUM_CHANNELS, MPEG_BIT_RATE );
-
+    
     inputParameters.device = Pa_GetDefaultInputDevice(); /* default input device */
     if (inputParameters.device == paNoDevice) {
         fprintf(stderr,"Error: No default input device.\n");
@@ -239,12 +272,7 @@ void player()
     PaStreamParameters  outputParameters;
     PaStream*           stream;
     PaError             err = paNoError;
-
-
-    audiomanager_r.configure(SAMPLE_RATE/FRAMES_PER_BUFFER, SAMPLE_RATE, NUM_CHANNELS, FRAMES_PER_BUFFER, sizeof(SAMPLE) );
-    audiomanager_r.reserve(SAMPLE_RATE/FRAMES_PER_BUFFER);
-    audiocoder_r.configure(SAMPLE_RATE, NUM_CHANNELS, MPEG_BIT_RATE );
-      
+ 
     outputParameters.device = Pa_GetDefaultOutputDevice(); /* default output device */
     if (outputParameters.device == paNoDevice) {
         fprintf(stderr,"Error: No default output device.\n");
@@ -295,13 +323,53 @@ done:
     }
 }
 
+void udpreceiver()
+{
+    /*
+    if (audiosock.bind())
+    {
+        exit(-1);
+    }
+    */
+    size_t lastframe=0;
+    do {
+        audiobuffermanager::shared_buffer audio = audiomanager_w.get_buffer();
+        struct audio_t* udpaudio = audiosock.receive(true);
+        if (udpaudio) {
+            fprintf(stdout,"frame=%lu last-frame=%lu diff=%d\n", udpaudio->frame, lastframe, udpaudio->frame-lastframe);
+            lastframe = udpaudio->frame;
+            if (!audio->udp2mpeg(udpaudio)) {
+                if (audio->mpeg2wav(audiocoder_r) == audio->getFramesize()) {
+                    // add it for playback
+                    audioq_w.add_output(audio);
+                }
+            }
+        } else {
+            fprintf(stdout,"udpreceive failed ...\n");
+        }
+    } while(1);
+}
 
 int main(void)
 {
+    audiomanager_w.configure(SAMPLE_RATE/FRAMES_PER_BUFFER, SAMPLE_RATE, NUM_CHANNELS, FRAMES_PER_BUFFER, sizeof(SAMPLE) );
+    audiomanager_w.reserve(SAMPLE_RATE/FRAMES_PER_BUFFER);
+    audiocoder_w.configure(SAMPLE_RATE, NUM_CHANNELS, MPEG_BIT_RATE );
+    
+    audiomanager_r.configure(SAMPLE_RATE/FRAMES_PER_BUFFER, SAMPLE_RATE, NUM_CHANNELS, FRAMES_PER_BUFFER, sizeof(SAMPLE) );
+    audiomanager_r.reserve(SAMPLE_RATE/FRAMES_PER_BUFFER);
+    audiocoder_r.configure(SAMPLE_RATE, NUM_CHANNELS, MPEG_BIT_RATE );
+     
+    if (audiosock.connect("5.189.186.79", "Andi")) {
+        exit(-1);
+    }
+    
     if( Pa_Initialize() != paNoError ) {
         fprintf(stderr,"error: failed to initialize port audio\n");
         exit(-1);
     }
+    
+    std::thread updReceiverThread(udpreceiver);
     std::thread recorderThread(recorder);
     std::thread playerThread(player);
     recorderThread.join();
